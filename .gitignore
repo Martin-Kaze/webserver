@@ -2,3 +2,4 @@ build/
 hello
 server
 *.o
+build-release/
