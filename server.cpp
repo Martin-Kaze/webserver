@@ -5,6 +5,99 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <string>
+#include <optional>
+#include <string_view>
+#include <utility> 
+
+struct Response
+{
+
+    int code;
+    std::string_view reason;
+    std::string_view content_type;
+    std::string body;
+};
+
+std::string_view reason(int code)
+{
+    switch (code)
+    {
+    case 200:
+        return "OK";
+
+    case 405:
+        return "Method Not Allowed";
+
+    case 400:
+        return "Bad Request";
+
+    case 404:
+        return "Not Found";
+
+    default:
+        return "Unknown";
+    }
+}
+std::optional<std::pair<std::string_view, std::string_view>>
+split(std::string_view v, std::string_view c)
+{
+    auto pos = v.find(c);
+    if (pos == std::string_view::npos)
+    {
+        return std::nullopt;
+    }
+    return std::pair{v.substr(0, pos), v.substr(pos + c.size())};
+}
+Response handleRes(std::string_view req)
+{
+
+    Response res;
+
+    res.content_type = "text/plain";
+
+    auto finish = [&](int code, std::string body)
+    {
+        res.code = code;
+        res.reason = reason(code);
+        res.body = std::move(body);
+        return res;
+    };
+
+    auto line = split(req, "\r\n");
+    if (!line)
+    {
+        return finish(400, "400 Bad Request\n");
+    }
+    auto [first_line, other] = *line;
+
+    auto a = split(first_line, " ");
+    if (!a)
+    {
+        return finish(400, "400 Bad Request\n");
+    }
+    auto [method, rest] = *a;
+
+    auto b = split(rest, " ");
+    if (!b)
+    {
+        return finish(400, "400 Bad Request\n");
+    }
+    auto [path, version] = *b;
+
+    if( method != "GET"){
+        return finish(405, "405 Method Not Allowed\n");
+    }
+
+    if(!version.starts_with("HTTP/1.")){
+        return finish(400,"400 Bad Request\n");
+    }
+
+    if(path.empty() || path.front() != '/'){
+         return finish(400,"400 Bad Request\n");
+    }
+
+    return  finish(200," Hello world\n");
+}
 
 int main()
 {
@@ -83,14 +176,16 @@ int main()
             continue;
         }
 
-        std::string body = "Hello from the server\n";
+        std::string_view view(&reqBuff[0], n);
 
-        response = "HTTP/1.1 200 OK\r\n"
-                   "Content-Type: text/plain\r\n"
-                   "Content-Length: " +
-                   std::to_string(body.size()) + "\r\n"
-                                                 "\r\n" +
-                   body;
+        const Response res = handleRes(view);
+
+        response = "HTTP/1.1 " + std::to_string(res.code) + " " + std::string(res.reason) + "\r\n"
+                                                                                            "Content-Type: " + std::string(res.content_type) + "\r\n"
+                                                                                            "Content-Length: " +
+                   std::to_string(res.body.size()) + "\r\n"
+                                                     "\r\n" +
+                   res.body;
 
         ssize_t written = write(client_fd, response.data(), response.size());
 
